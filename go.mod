@@ -3,6 +3,7 @@ module github.com/pramsey/pg_eventserv
 go 1.18
 
 require (
+	github.com/gorilla/mux v1.8.0
 	github.com/gorilla/websocket v1.5.0
 	github.com/jackc/pgconn v1.13.0
 	github.com/jackc/pgx/v4 v4.17.2

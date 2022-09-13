@@ -5,17 +5,18 @@ import (
 	// Core
 	"context"
 	"fmt"
+	"io/ioutil"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"time"
 
 	// Web Sockets Library
 	"github.com/gorilla/websocket"
 
 	// REST routing
-	// "github.com/gorilla/handlers"
-	// "github.com/gorilla/mux"
+	"github.com/gorilla/mux"
 
 	// Send multiple channel messages at once
 	// used to send notificaitons to web sockts
@@ -280,38 +281,38 @@ func webSocketHandler(relay *broadcast.Relay[pgconn.Notification]) http.Handler 
 	})
 }
 
-// func getRouter() *mux.Router {
-// 	// creates a new instance of a mux router
-// 	r := mux.NewRouter().
-// 		StrictSlash(true).
-// 		PathPrefix(
-// 			"/" +
-// 				strings.TrimLeft(viper.GetString("BasePath"), "/"),
-// 		).
-// 		Subrouter()
+func getRouter() *mux.Router {
+	// creates a new instance of a mux router
+	r := mux.NewRouter().
+		StrictSlash(true).
+		PathPrefix(
+			"/" +
+				strings.TrimLeft(viper.GetString("BasePath"), "/"),
+		).
+		Subrouter()
 
-// 	// Front page and layer list
-// 	r.Handle("/", http.HandlerFunc(requestHomeHTML))
-// 	r.Handle("/index.html", http.HandlerFunc(requestHomeHTML))
-// 	// r.Handle("/index.json", tileAppHandler(requestListJSON))
-// 	// Tile requests
-// 	// r.Handle("/{name}/{z:[0-9]+}/{x:[0-9]+}/{y:[0-9]+}.{ext}", tileMetrics(tileAppHandler(requestTiles)))
+	// Front page and layer list
+	r.Handle("/", http.HandlerFunc(requestHomeHTML))
+	r.Handle("/index.html", http.HandlerFunc(requestHomeHTML))
+	// r.Handle("/index.json", tileAppHandler(requestListJSON))
+	// Tile requests
+	// r.Handle("/{name}/{z:[0-9]+}/{x:[0-9]+}/{y:[0-9]+}.{ext}", tileMetrics(tileAppHandler(requestTiles)))
 
-// 	return r
-// }
+	return r
+}
 
-// func requestHomeHTML(w http.ResponseWriter, r *http.Request) error {
-// 	log.WithFields(log.Fields{
-// 		"event": "request",
-// 		"topic": "root",
-// 	}).Trace("requestListHtml")
+func requestHomeHTML(w http.ResponseWriter, r *http.Request) {
+	log.WithFields(log.Fields{
+		"event": "request",
+		"topic": "root",
+	}).Trace("requestListHtml")
 
-// 	content, err := ioutil.ReadFile(fmt.Sprintf("%s/index.html", viper.GetString("AssetsPath")))
-// 	if err != nil {
-// 		return err
-// 	}
+	content, err := ioutil.ReadFile(fmt.Sprintf("%s/index.html", viper.GetString("AssetsPath")))
+	if err != nil {
+		return
+	}
 
-// 	w.Write(content)
+	w.Write(content)
 
-// 	return nil
-// }
+	return
+}
