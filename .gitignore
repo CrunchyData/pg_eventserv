@@ -1,0 +1,5 @@
+pg_eventserv
+pg_eventserv.exe
+*.code-workspace
+docs/
+config/pg_eventserv*.toml
