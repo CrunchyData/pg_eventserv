@@ -52,7 +52,7 @@ CREATE INDEX objects_history_geog_x ON objects USING GIST (geog);
 
 --
 -- The geofences table holds the polygons to be used to generate
--- "entrance" and "exit" events for objects. 
+-- "entrance" and "exit" events for objects.
 --
 DROP TABLE IF EXISTS geofences;
 CREATE TABLE geofences (
@@ -78,7 +78,7 @@ CREATE INDEX geofences_geog_x ON geofences USING GIST (geog);
 -- is crossing, so that in the next step it can be compared to
 -- the last known set of geofences.
 --
-DROP FUNCTION IF EXISTS objects_geofence;
+DROP FUNCTION IF EXISTS objects_geofence CASCADE;
 CREATE FUNCTION objects_geofence() RETURNS trigger AS $$
     DECLARE
         fences_new integer[];
@@ -87,7 +87,7 @@ CREATE FUNCTION objects_geofence() RETURNS trigger AS $$
         -- tuple every time.
         SELECT coalesce(array_agg(id), ARRAY[]::integer[])
             INTO fences_new
-            FROM geofences
+            FROM moving.geofences
             WHERE ST_Intersects(geofences.geog, new.geog);
 
         -- Ensure geofence state gets saved
@@ -96,10 +96,11 @@ CREATE FUNCTION objects_geofence() RETURNS trigger AS $$
     END;
 $$ LANGUAGE 'plpgsql';
 
-CREATE TRIGGER objects_update 
-    AFTER INSERT OR UPDATE ON objects
-    FOR EACH ROW 
-        EXECUTE FUNCTION objects_update();
+DROP TRIGGER IF EXISTS objects_geofence ON moving.objects;
+CREATE TRIGGER objects_geofence
+    AFTER INSERT OR UPDATE ON moving.objects
+    FOR EACH ROW
+        EXECUTE FUNCTION objects_geofence();
 
 --
 -- objects_update() is a trigger function run AFTER
@@ -108,10 +109,10 @@ CREATE TRIGGER objects_update
 -- id constraint) then this function is not run.
 -- If the row can be stored in the objects table, then
 -- we also want to memorialize it in the history table,
--- and build up a notification payload to feed out to 
+-- and build up a notification payload to feed out to
 -- any clients watching the listen/notify channel.
 --
-DROP FUNCTION IF EXISTS objects_update;
+DROP FUNCTION IF EXISTS objects_update CASCADE;
 CREATE FUNCTION objects_update() RETURNS trigger AS $$
     DECLARE
         fences_old integer[];
@@ -123,7 +124,7 @@ CREATE FUNCTION objects_update() RETURNS trigger AS $$
         payload_json jsonb;
     BEGIN
         -- Place a copy of the value into the history table
-        INSERT INTO objects_history (id, geog, ts, props)
+        INSERT INTO moving.objects_history (id, geog, ts, props)
             VALUES (NEW.id, NEW.geog, NEW.ts, NEW.props);
 
         -- Clean up any nulls
@@ -135,25 +136,25 @@ CREATE FUNCTION objects_update() RETURNS trigger AS $$
 
         -- Form geofence events into JSON for notify payload
         WITH r AS (
-        SELECT 'entered' AS action, 
-            geofences.id AS geofence_id, 
-            geofences.label AS geofence_label 
-        FROM geofences 
-        WHERE geofences.id = ANY(fences_entered)
-        UNION 
-        SELECT 'left' AS action, 
-            geofences.id AS geofence_id, 
-            geofences.label AS geofence_label 
-        FROM geofences 
-        WHERE geofences.id = ANY(fences_left)
+        SELECT 'entered' AS action,
+            g.id AS geofence_id,
+            g.label AS geofence_label
+        FROM moving.geofences g
+        WHERE g.id = ANY(fences_entered)
+        UNION
+        SELECT 'left' AS action,
+            g.id AS geofence_id,
+            g.label AS geofence_label
+        FROM moving.geofences g
+        WHERE g.id = ANY(fences_left)
         )
-        SELECT json_agg(row_to_json(r)) 
+        SELECT json_agg(row_to_json(r))
         INTO events_json
         FROM r;
 
         -- Form notify payload
         SELECT json_build_object(
-            'object_id', NEW.id, 
+            'object_id', NEW.id,
             'events', events_json,
             'location', json_build_object(
                 'longitude', ST_X(NEW.geog::geometry),
@@ -173,9 +174,10 @@ CREATE FUNCTION objects_update() RETURNS trigger AS $$
     END;
 $$ LANGUAGE 'plpgsql';
 
-CREATE TRIGGER objects_geofence 
-    BEFORE INSERT OR UPDATE ON objects
-    FOR EACH ROW 
-        EXECUTE FUNCTION objects_geofence();
+DROP TRIGGER IF EXISTS objects_update ON moving.objects;
+CREATE TRIGGER objects_update
+    BEFORE INSERT OR UPDATE ON moving.objects
+    FOR EACH ROW
+        EXECUTE FUNCTION objects_update();
 
 ------------------------------------------------------------------------

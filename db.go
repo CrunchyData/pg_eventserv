@@ -18,10 +18,8 @@ import (
 
 func dbConnect() (*pgxpool.Pool, error) {
 	if globalDb == nil {
-		var err error
-		var config *pgxpool.Config
 		dbConnection := viper.GetString("DbConnection")
-		config, err = pgxpool.ParseConfig(dbConnection)
+		config, err := pgxpool.ParseConfig(dbConnection)
 		if err != nil {
 			log.Fatal(err)
 		}

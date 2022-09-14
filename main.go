@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"time"
 
 	// Web Sockets Library
@@ -45,6 +46,11 @@ const programVersion string = "0.1"
 // var programVersion string
 var globalSocketCount int = 0
 
+func nextSocketNum() int {
+	globalSocketCount = globalSocketCount + 1
+	return globalSocketCount
+}
+
 // globalDb is a global database connection pointer
 var globalDb *pgxpool.Pool = nil
 
@@ -53,8 +59,8 @@ var upgrader = websocket.Upgrader{
 	ReadBufferSize:   1024,
 	WriteBufferSize:  1024,
 	Error: func(w http.ResponseWriter, r *http.Request, status int, reason error) {
-		if _, errWrite := w.Write([]byte("websocket connection failed")); errWrite != nil {
-			log.Fatal("unable to web socket error to output")
+		if _, errWrite := w.Write([]byte("websocket connection failed\n")); errWrite != nil {
+			log.Fatal("unable to write web socket error to output")
 		}
 		return
 	},
@@ -62,6 +68,37 @@ var upgrader = websocket.Upgrader{
 	CheckOrigin:       func(r *http.Request) bool { return true },
 	EnableCompression: false,
 }
+
+/**********************************************************************/
+
+type bcastRelay *broadcast.Relay[pgconn.Notification]
+type RelayPool map[string]bcastRelay
+
+// get a relay from the map if possible, otherwise
+// create a new one and store it in the map
+func (rm RelayPool) GetRelay(channel string) (er bcastRelay, isNew bool) {
+	if relay, ok := rm[channel]; ok {
+		return relay, false
+	}
+	rm[channel] = broadcast.NewRelay[pgconn.Notification]()
+	return rm[channel], true
+}
+
+func (rm RelayPool) Close(channel string) {
+	if relay, ok := rm[channel]; ok {
+		(*relay).Close()
+		delete(rm, channel)
+	}
+}
+
+func (rm RelayPool) CloseAll() {
+	for channel, relay := range rm {
+		(*relay).Close()
+		delete(rm, channel)
+	}
+}
+
+/**********************************************************************/
 
 func init() {
 	viper.SetDefault("DbConnection", "sslmode=disable")
@@ -139,8 +176,7 @@ func main() {
 			}
 		}
 	} else {
-		// Really would like to log location of filename we found...
-		// 	log.Infof("Reading configuration file %s", cf)
+		// Log location of filename we found...
 		if cf := viper.ConfigFileUsed(); cf != "" {
 			log.Infof("Using config file: %s", cf)
 		} else {
@@ -161,21 +197,20 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Create a relay for to pass Notifications through
-	relay := broadcast.NewRelay[pgconn.Notification]()
-	defer relay.Close()
+	relayMap := make(RelayPool)
+	relayMapMutex := &sync.Mutex{}
+	wsHandlerFunc := webSocketHandler(relayMap, relayMapMutex, db)
 
-	// Set up the listening thread
-	go listenForNotify(db, "objects", relay)
+	r := getRouter(wsHandlerFunc)
 
 	// prepare the HTTP server object
 	// more "production friendly" timeouts
 	// https://blog.simon-frey.eu/go-as-in-golang-standard-net-http-config-will-break-your-production/#You_should_at_least_do_this_The_easy_path
 	s := &http.Server{
-		ReadTimeout:  1 * time.Second,
-		WriteTimeout: 1 * time.Second,
+		ReadTimeout:  2 * time.Second,
+		WriteTimeout: 2 * time.Second,
 		Addr:         fmt.Sprintf("%s:%d", viper.GetString("HttpHost"), viper.GetInt("HttpPort")),
-		Handler:      webSocketHandler(relay),
+		Handler:      r,
 	}
 
 	// start http service
@@ -192,17 +227,12 @@ func main() {
 	signal.Notify(sig, os.Interrupt)
 	<-sig
 
-	//http.HandleFunc("/object", webSocketHandler(relay.Listener(1)))
-
-	// http.HandleFunc("/objectold", func(w http.ResponseWriter, r *http.Request) {
-	// 	ws, _ := upgrader.Upgrade(w, r, nil) // error ignored for sake of simplicity
-
 }
 
 // goroutine to watch a PgSQL LISTEN/NOTIFY channel, and
 // send the notification object to the broadcast relay
 // when an event comes through
-func listenForNotify(db *pgxpool.Pool, listenChannel string, relay *broadcast.Relay[pgconn.Notification]) {
+func listenForNotify(db *pgxpool.Pool, listenChannel string, relay bcastRelay) {
 	// draw a connection from the pool to use for listening
 	conn, err := db.Acquire(context.Background())
 	if err != nil {
@@ -221,7 +251,8 @@ func listenForNotify(db *pgxpool.Pool, listenChannel string, relay *broadcast.Re
 	for {
 		notification, err := conn.Conn().WaitForNotification(context.Background())
 		if err != nil {
-			log.Warnf("Error from WaitForNotification():", err)
+			log.Warnf("WaitForNotification failed: %s", err)
+			(*relay).Close()
 		}
 
 		log.Debugf("NOTIFY received, channel '%s', payload '%s'",
@@ -229,7 +260,7 @@ func listenForNotify(db *pgxpool.Pool, listenChannel string, relay *broadcast.Re
 			notification.Payload)
 
 		// send the notification to all listeners connected to the relay
-		relay.NotifyCtx(context.Background(), *notification)
+		(*relay).NotifyCtx(context.Background(), *notification)
 	}
 }
 
@@ -237,58 +268,70 @@ func listenForNotify(db *pgxpool.Pool, listenChannel string, relay *broadcast.Re
 // to run. Handler converts request to websocket, and sets up
 // goroutine to listen for broadcast messages from the db notification
 // goroutine. Websocket is held open by pinging client regularly.
-func webSocketHandler(relay *broadcast.Relay[pgconn.Notification]) http.Handler {
+func webSocketHandler(rm RelayPool, rmm *sync.Mutex, db *pgxpool.Pool) http.Handler {
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		wsChannel := mux.Vars(r)["channel"]
+		log.Debugf("request to open channel '%s' received", wsChannel)
+
 		// keep a unique number for each new socket we create
-		globalSocketCount = globalSocketCount + 1
-		iSocket := globalSocketCount
-		log.Debugf("handling web socket creation request")
+		wsNumber := nextSocketNum()
+
 		// create the web socket
 		ws, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
-			log.Warnf("web socket creation failed: err")
+			log.Warnf("web socket creation failed: %s", err)
 			return
 		}
-		log.Debugf("created websocket %d", iSocket)
+		log.Debugf("created websocket %d for channel '%s'", wsNumber, wsChannel)
 		defer ws.Close()
 
-		// Create a listener for the relay
-		lst := relay.Listener(1)
+		// make a broadcast listener for this socket
+		rmm.Lock()
+		relay, isNew := rm.GetRelay(wsChannel)
+		rmm.Unlock()
+		lst := (*relay).Listener(1)
+		defer lst.Close()
 
-		// Gorouting to monitor the relay listener and send messages
+		// Create the database listening thread, if one was not already created
+		// The thread has the relay and broadcasts the events to all
+		// the other listeners on this relay. So only one of the websocket
+		// threads, for each channel, will be running this goroutine
+		if isNew {
+			go listenForNotify(db, wsChannel, relay)
+		}
+
+		// Goroutine to monitor the relay listener and send messages
 		// to the web socket client when new notifications arrive
 		go func() {
 			for n := range lst.Ch() { // Ranges over notifications
-				log.Debugf("sending notification to web socket %d: %s", iSocket, n.Payload)
+				log.Debugf("sending notification to web socket %d: %s", wsNumber, n.Payload)
 				bPayload := []byte(n.Payload)
 				if err := ws.WriteMessage(websocket.TextMessage, bPayload); err != nil {
-					log.Debugf("web socket %d closed connection", iSocket)
-					lst.Close()
+					log.Debugf("web socket %d closed connection", wsNumber)
 					return
 				}
 			}
 		}()
 
-		// Keep the web socket open as long as the client keeps
-		// its side open.
+		// Keep this web socket open as long as the client keeps
+		// its side open
 		for {
 			wserr := ws.WriteMessage(websocket.PingMessage, []byte("ping"))
-			// When socket no longer accepts writes, close it and the associated
-			// listener
+			// When socket no longer accepts writes, end this function,
+			// which will do the defered close of the socket and listener
 			if wserr != nil {
-				log.Infof("closing web socket %d after write failure", iSocket)
-				lst.Close()
+				log.Infof("closing web socket %d after write failure", wsNumber)
 				return
 			}
 			// Only ping the client every few seconds
 			time.Sleep(time.Second * 2)
 		}
-
+		// h.ServeHTTP(w, r)
 	})
 }
 
-func getRouter() *mux.Router {
+func getRouter(wsHandler http.Handler) *mux.Router {
 	// creates a new instance of a mux router
 	r := mux.NewRouter().
 		StrictSlash(true).
@@ -298,13 +341,11 @@ func getRouter() *mux.Router {
 		).
 		Subrouter()
 
-	// Front page and layer list
+	// Front page
 	r.Handle("/", http.HandlerFunc(requestHomeHTML))
 	r.Handle("/index.html", http.HandlerFunc(requestHomeHTML))
-	// r.Handle("/index.json", tileAppHandler(requestListJSON))
-	// Tile requests
-	// r.Handle("/{name}/{z:[0-9]+}/{x:[0-9]+}/{y:[0-9]+}.{ext}", tileMetrics(tileAppHandler(requestTiles)))
-
+	// Channel websocket subscription
+	r.Handle("/{channel}", wsHandler)
 	return r
 }
 

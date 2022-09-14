@@ -98,8 +98,8 @@ ws.onmessage = function (e) {
     var payload = JSON.parse(e.data);
     outputField.innerHTML = JSON.stringify(payload, null, 2) + "\n";
   }
-  catch (e) {
-    outputField.innerHTML = "[ERROR: Unable to parse JSON payload]\n";
+  catch (err) {
+    outputField.innerHTML = "Error: Unable to parse JSON payload\n\n";
     outputField.innerHTML += e.data;
     return;
   }
@@ -118,13 +118,11 @@ ws.onmessage = function (e) {
 
     const curFeature = objectSource.getFeatureById(oid);
     if (curFeature) {
-      console.log("curFeature");
       curFeature.setGeometry(objGeom);
       curFeature.setProperties(objProps);
       console.log(curFeature);
     }
     else {
-      console.log("newFeature");
       const newFeature = new ol.Feature(objGeom);
       newFeature.setProperties(objProps);
       newFeature.setId(oid);
