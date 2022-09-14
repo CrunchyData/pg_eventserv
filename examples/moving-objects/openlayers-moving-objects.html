@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Moving Objects</title>
+
+  <!-- CSS/JS for OpenLayers map  -->
+  <script src="https://cdn.jsdelivr.net/npm/ol@v7.1.0/dist/ol.js"></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ol@v7.1.0/ol.css" type="text/css">
+
+  <style>
+    body {
+      padding: 0;
+      margin: 0;
+    }
+    html, body, #map {
+      height: 100%;
+      width: 100%;
+      font-family: sans-serif;
+    }
+    #meta {
+      background-color: rgba(255,255,255,0.75);
+      color: black;
+      z-index: 2;
+      position: absolute;
+      top: 10px;
+      left: 20px;
+      padding: 10px 20px;
+      margin: 0;
+    }
+  </style>
+</head>
+
+<body>
+
+<div id="meta">
+  <h2>Moving Objects</h2>
+  <textarea id="wsPayload" cols="60" rows="5"></textarea>
+  <p>Status: <span id="wsStatus">Connecting...</span></p>
+</div>
+
+<div id="map"></div>
+
+<script>
+
+var objectServer = "ws://localhost:7700/objects";
+var objectSource = new ol.source.Vector();
+var objectLayer = new ol.layer.Vector({
+  source: objectSource,
+  style: new ol.style.Style({
+    image: new ol.style.RegularShape({
+      fill: new ol.style.Fill({
+        color: 'red'
+      }),
+      stroke: new ol.style.Stroke({
+        width: 1,
+        color: 'grey'
+      }),
+      points: 16,
+      radius: 4,
+      angle: Math.PI / 4
+    })
+  })
+});
+
+var baseLayer = new ol.layer.Tile({
+  source: new ol.source.XYZ({
+    url: "https://maps.wikimedia.org/osm-intl/{z}/{x}/{y}.png"
+  })
+});
+
+var map = new ol.Map({
+  target: 'map',
+  view: new ol.View({
+    center: [0, 0],
+    zoom: 2
+  }),
+  layers: [baseLayer, objectLayer]
+});
+
+var outputField = document.getElementById("wsPayload");
+var outputStatus = document.getElementById("wsStatus");
+console.log("before websocket");
+var ws = new WebSocket(objectServer);
+console.log("after websocket");
+
+ws.onopen = function () {
+  outputStatus.innerHTML = "Connected\n";
+};
+
+ws.onerror = function(error) {
+  console.log(`[error] ${error.message}`);
+};
+
+ws.onmessage = function (e) {
+  try {
+    var payload = JSON.parse(e.data);
+    outputField.innerHTML = JSON.stringify(payload, null, 2) + "\n";
+  }
+  catch (e) {
+    outputField.innerHTML = "[ERROR: Unable to parse JSON payload]\n";
+    outputField.innerHTML += e.data;
+    return;
+  }
+
+  if ("object_id" in payload && "events" in payload && "location" in payload) {
+    var oid = payload.object_id;
+    var lng = payload.location.longitude;
+    var lat = payload.location.latitude;
+    var coord = ol.proj.transform([lng, lat], 'EPSG:4326', 'EPSG:3857');
+
+    const objGeom = new ol.geom.Point(coord);
+    const objProps = {
+      timeStamp: payload.location.ts,
+      props: payload.props,
+    };
+
+    const curFeature = objectSource.getFeatureById(oid);
+    if (curFeature) {
+      console.log("curFeature");
+      curFeature.setGeometry(objGeom);
+      curFeature.setProperties(objProps);
+      console.log(curFeature);
+    }
+    else {
+      console.log("newFeature");
+      const newFeature = new ol.Feature(objGeom);
+      newFeature.setProperties(objProps);
+      newFeature.setId(oid);
+      console.log(newFeature);
+      objectSource.addFeature(newFeature);
+    }
+  }
+  else {
+    outputField.innerHTML = outputField.innerHTML + "\n[ERROR: Payload is not moving object]\n";
+  }
+
+};
+
+// {
+// 'object_id': 1,
+// 'events': [
+//   {
+//     'action': 'left',
+//     'geofence_id': 3,
+//     'geofence_label': 'Ranch'
+//   }
+// ],
+// 'location': {
+//   'longitude': -126.4,
+//   'latitude', 45.3,
+//   'ts', '2001-01-01 12:34:45.1234',
+//   'props', {'name':'Paul'}
+//   }
+// }
+
+// ws.send(input.value);
+</script>
+
+</body>
+</html>
