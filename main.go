@@ -48,8 +48,18 @@ var globalSocketCount int = 0
 var globalDb *pgxpool.Pool = nil
 
 var upgrader = websocket.Upgrader{
-	ReadBufferSize:  0,
-	WriteBufferSize: 0,
+	HandshakeTimeout: time.Second,
+	ReadBufferSize:   1024,
+	WriteBufferSize:  1024,
+	Error: func(w http.ResponseWriter, r *http.Request, status int, reason error) {
+		if _, errWrite := w.Write([]byte("websocket connection failed")); errWrite != nil {
+			log.Fatal("unable to web socket error to output")
+		}
+		return
+	},
+	// Temporarily disable origin checking on the websockets upgrader
+	CheckOrigin:       func(r *http.Request) bool { return true },
+	EnableCompression: false,
 }
 
 func init() {
@@ -155,14 +165,14 @@ func main() {
 	defer relay.Close()
 
 	// Set up the listening thread
-	go listenForNotify(db, "object", relay)
+	go listenForNotify(db, "objects", relay)
 
 	// prepare the HTTP server object
 	// more "production friendly" timeouts
 	// https://blog.simon-frey.eu/go-as-in-golang-standard-net-http-config-will-break-your-production/#You_should_at_least_do_this_The_easy_path
 	s := &http.Server{
-		ReadTimeout:  1000, // 1 * time.Second,
-		WriteTimeout: 1000, // writeTimeout,
+		ReadTimeout:  1 * time.Second,
+		WriteTimeout: 1 * time.Second,
 		Addr:         fmt.Sprintf("%s:%d", viper.GetString("HttpHost"), viper.GetInt("HttpPort")),
 		Handler:      webSocketHandler(relay),
 	}
@@ -175,9 +185,6 @@ func main() {
 			log.Fatal(err)
 		}
 	}()
-
-	// Temporarily disable origin checking on the websockets upgrader
-	upgrader.CheckOrigin = func(r *http.Request) bool { return true }
 
 	// wait here for interrupt signal
 	sig := make(chan os.Signal, 1)
