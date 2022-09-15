@@ -5,7 +5,7 @@ import (
 	// Core
 	"context"
 	"fmt"
-	"io/ioutil"
+	"html/template"
 	"net/http"
 	"os"
 	"os/signal"
@@ -342,25 +342,28 @@ func getRouter(wsHandler http.Handler) *mux.Router {
 		Subrouter()
 
 	// Front page
-	r.Handle("/", http.HandlerFunc(requestHomeHTML))
-	r.Handle("/index.html", http.HandlerFunc(requestHomeHTML))
+	r.Handle("/", http.HandlerFunc(requestIndexHTML))
+	r.Handle("/index.html", http.HandlerFunc(requestIndexHTML))
 	// Channel websocket subscription
-	r.Handle("/{channel}", wsHandler)
+	r.Handle("/channels/{channel}", wsHandler)
 	return r
 }
 
-func requestHomeHTML(w http.ResponseWriter, r *http.Request) {
+func requestIndexHTML(w http.ResponseWriter, r *http.Request) {
 	log.WithFields(log.Fields{
 		"event": "request",
 		"topic": "root",
-	}).Trace("requestListHtml")
+	}).Trace("requestIndexHTML")
 
-	content, err := ioutil.ReadFile(fmt.Sprintf("%s/index.html", viper.GetString("AssetsPath")))
+	type IndexFields struct {
+		BaseURL string
+	}
+
+	indexFields := IndexFields{serverWsBase(r)}
+	tmpl, err := template.ParseFiles(fmt.Sprintf("%s/index.html", viper.GetString("AssetsPath")))
 	if err != nil {
 		return
 	}
-
-	w.Write(content)
-
+	tmpl.Execute(w, indexFields)
 	return
 }

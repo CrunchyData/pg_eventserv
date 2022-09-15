@@ -42,6 +42,20 @@ func serverURLBase(r *http.Request) string {
 	return formatBaseURL(baseHost, basePath)
 }
 
+func serverWsBase(r *http.Request) string {
+	urlBase := serverURLBase(r)
+	u, err := url.Parse(urlBase)
+	if err != nil {
+		log.Fatal(err)
+	}
+	scheme := "ws"
+	if r.TLS != nil {
+		scheme = "wss"
+	}
+	u.Scheme = scheme
+	return u.String()
+}
+
 // serverURLHost returns the host (and scheme)
 // for this service.
 // In the case of access via a proxy service, if

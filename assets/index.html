@@ -1,6 +1,53 @@
 <html>
-<header><title>Home</title>
-</header>
+  <head>
+    <title>pg_eventserv</title>
+    <!-- <link rel="stylesheet" type="text/css" href="pg_tileserv.css" /> -->
+  </head>
+  <style type="text/css">
+    body {margin:0;padding:0;font-family:sans-serif;}
+    h1 {padding:1em;margin:0;width:auto;background:#0167B4;color:white;}
+    #content {padding:1em 2em;line-height:1.3em;}
+    h2 {font-size:120%;}
+  </style>
 <body>
-This is the home page.
+  <h1>pg_eventserv</h1>
+  <div id="content">
+    <p>Enter a channel name and click "Connect".</p>
+    <p><input type="text" id="channel">&nbsp;<input type="button" value="Connect" onClick="connect()"></p>
+    <div id="channels">
+    </div>
+  </div>
+  <script>
+
+    function connect() {
+      var channel = document.getElementById("channel").value;
+      var url = "{{ .BaseURL }}/channels/" + channel;
+      var channelsDiv = document.getElementById("channels");
+      var div = document.createElement("div");
+      channelsDiv.append(div);
+      div.innerHTML = `<hr/><p id="status_${channel}">Connecting to <b>${channel}</b>...</p><p><textarea id="content_${channel}" rows="10" cols="80"></textarea></p>`;
+      var outputStatus = document.getElementById(`status_${channel}`);
+      var outputContent = document.getElementById(`content_${channel}`);
+      var ws = new WebSocket(url);
+      ws.onopen = function () {
+        outputStatus.innerHTML = `Connected to <b>${channel}</b>`;
+      };
+      ws.onerror = function(error) {
+        console.log(`[error] ${error.message}`);
+      };
+      ws.onmessage = function (msg) {
+        try {
+          var msg_json = JSON.parse(msg.data);
+          outputContent.innerHTML += JSON.stringify(msg_json, null, 2) + "\n";
+        }
+        catch (err) {
+          outputContent.innerHTML += msg.data + "\n";
+        }
+      }
+    }
+
+  </script>
+
+</div>
 </body>
+</html>
