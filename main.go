@@ -71,17 +71,17 @@ var upgrader = websocket.Upgrader{
 
 /**********************************************************************/
 
-type bcastRelay *broadcast.Relay[pgconn.Notification]
-type RelayPool map[string]bcastRelay
+type BcastRelay *broadcast.Relay[pgconn.Notification]
+type RelayPool map[string]BcastRelay
 
 // get a relay from the map if possible, otherwise
 // create a new one and store it in the map
-func (rm RelayPool) GetRelay(channel string) (er bcastRelay, isNew bool) {
+func (rm RelayPool) GetRelay(channel string) (er BcastRelay) {
 	if relay, ok := rm[channel]; ok {
-		return relay, false
+		return relay
 	}
 	rm[channel] = broadcast.NewRelay[pgconn.Notification]()
-	return rm[channel], true
+	return rm[channel]
 }
 
 func (rm RelayPool) Close(channel string) {
@@ -95,6 +95,14 @@ func (rm RelayPool) CloseAll() {
 	for channel, relay := range rm {
 		(*relay).Close()
 		delete(rm, channel)
+	}
+}
+
+func (rm RelayPool) HasChannel(channel string) bool {
+	if _, ok := rm[channel]; ok {
+		return true
+	} else {
+		return false
 	}
 }
 
@@ -116,6 +124,7 @@ func init() {
 	viper.SetDefault("DbTimeout", 10)
 	viper.SetDefault("CORSOrigins", []string{"*"})
 	viper.SetDefault("BasePath", "/")
+	viper.SetDefault("Channels", []string{"*"})
 }
 
 func main() {
@@ -232,7 +241,7 @@ func main() {
 // goroutine to watch a PgSQL LISTEN/NOTIFY channel, and
 // send the notification object to the broadcast relay
 // when an event comes through
-func listenForNotify(db *pgxpool.Pool, listenChannel string, relay bcastRelay) {
+func listenForNotify(db *pgxpool.Pool, listenChannel string, relay BcastRelay) {
 	// draw a connection from the pool to use for listening
 	conn, err := db.Acquire(context.Background())
 	if err != nil {
@@ -242,7 +251,8 @@ func listenForNotify(db *pgxpool.Pool, listenChannel string, relay bcastRelay) {
 	log.Infof("Listening to the '%s' database channel\n", listenChannel)
 
 	// send the LISTEN command to the connection
-	_, err = conn.Exec(context.Background(), fmt.Sprintf("LISTEN %s", listenChannel))
+	listenSQL := fmt.Sprintf("LISTEN %s", listenChannel)
+	_, err = conn.Exec(context.Background(), listenSQL)
 	if err != nil {
 		log.Fatalf("Error listening to '%s' channel: %s", listenChannel, err)
 	}
@@ -268,7 +278,7 @@ func listenForNotify(db *pgxpool.Pool, listenChannel string, relay bcastRelay) {
 // to run. Handler converts request to websocket, and sets up
 // goroutine to listen for broadcast messages from the db notification
 // goroutine. Websocket is held open by pinging client regularly.
-func webSocketHandler(rm RelayPool, rmm *sync.Mutex, db *pgxpool.Pool) http.Handler {
+func webSocketHandler(rm RelayPool, rmMutex *sync.Mutex, db *pgxpool.Pool) http.Handler {
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		wsChannel := mux.Vars(r)["channel"]
@@ -287,19 +297,18 @@ func webSocketHandler(rm RelayPool, rmm *sync.Mutex, db *pgxpool.Pool) http.Hand
 		defer ws.Close()
 
 		// make a broadcast listener for this socket
-		rmm.Lock()
-		relay, isNew := rm.GetRelay(wsChannel)
-		rmm.Unlock()
-		lst := (*relay).Listener(1)
-		defer lst.Close()
-
-		// Create the database listening thread, if one was not already created
-		// The thread has the relay and broadcasts the events to all
-		// the other listeners on this relay. So only one of the websocket
-		// threads, for each channel, will be running this goroutine
-		if isNew {
+		rmMutex.Lock()
+		newChannel := rm.HasChannel(wsChannel)
+		relay := rm.GetRelay(wsChannel)
+		rmMutex.Unlock()
+		// Only start a new database listener for new channels
+		// All other sockets just hang off the first listeners
+		// relay broadcasts
+		if !newChannel {
 			go listenForNotify(db, wsChannel, relay)
 		}
+		lst := (*relay).Listener(1)
+		defer lst.Close()
 
 		// Goroutine to monitor the relay listener and send messages
 		// to the web socket client when new notifications arrive

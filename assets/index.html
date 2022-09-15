@@ -38,10 +38,10 @@
       ws.onmessage = function (msg) {
         try {
           var msg_json = JSON.parse(msg.data);
-          outputContent.innerHTML += JSON.stringify(msg_json, null, 2) + "\n";
+          outputContent.innerHTML = JSON.stringify(msg_json, null, 2) + "\n";
         }
         catch (err) {
-          outputContent.innerHTML += msg.data + "\n";
+          outputContent.innerHTML = msg.data + "\n";
         }
       }
       ws.onclose = function() {
