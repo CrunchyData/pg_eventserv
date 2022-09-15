@@ -19,6 +19,9 @@ import (
 	// REST routing
 	"github.com/gorilla/mux"
 
+	// Pattern match channel names
+	"github.com/komem3/glob"
+
 	// Send multiple channel messages at once
 	// used to send notificaitons to web sockts
 	"github.com/teivah/broadcast"
@@ -104,6 +107,25 @@ func (rm RelayPool) HasChannel(channel string) bool {
 	} else {
 		return false
 	}
+}
+
+/**********************************************************************/
+
+func ChannelValid(checkChannel string) bool {
+	validList := viper.GetStringSlice("Channels")
+	for _, channelGlob := range validList {
+		matcher, err := glob.Compile(channelGlob)
+		if err != nil {
+			log.Warnf("invalid channel pattern in Channels configuration: %s", channelGlob)
+			return false
+		}
+		isValid := matcher.MatchString(checkChannel)
+		if isValid {
+			return true
+		}
+	}
+	log.Infof("web socket creation request invalid channel '%s'", checkChannel)
+	return false
 }
 
 /**********************************************************************/
@@ -198,6 +220,7 @@ func main() {
 		viper.GetString("HttpHost"), viper.GetInt("HttpPort")), basePath))
 	log.Infof("Serving HTTPS at %s/", formatBaseURL(fmt.Sprintf("http://%s:%d",
 		viper.GetString("HttpHost"), viper.GetInt("HttpsPort")), basePath))
+	log.Infof("Channels available: %s", strings.Join(viper.GetStringSlice("Channels"), ", "))
 
 	// made a database connection pool
 	db, err := dbConnect()
@@ -283,6 +306,14 @@ func webSocketHandler(rm RelayPool, rmMutex *sync.Mutex, db *pgxpool.Pool) http.
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		wsChannel := mux.Vars(r)["channel"]
 		log.Debugf("request to open channel '%s' received", wsChannel)
+
+		if !ChannelValid(wsChannel) {
+			w.WriteHeader(403) // forbidden
+			errMsg := fmt.Sprintf("requested channel '%s' is not allowed", wsChannel)
+			log.Debug(errMsg)
+			w.Write([]byte(errMsg))
+			return
+		}
 
 		// keep a unique number for each new socket we create
 		wsNumber := nextSocketNum()
