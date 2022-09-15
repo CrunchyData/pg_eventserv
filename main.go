@@ -345,7 +345,7 @@ func getRouter(wsHandler http.Handler) *mux.Router {
 	r.Handle("/", http.HandlerFunc(requestIndexHTML))
 	r.Handle("/index.html", http.HandlerFunc(requestIndexHTML))
 	// Channel websocket subscription
-	r.Handle("/channels/{channel}", wsHandler)
+	r.Handle("/listen/{channel}", wsHandler)
 	return r
 }
 

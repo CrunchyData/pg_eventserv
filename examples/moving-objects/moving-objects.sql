@@ -115,10 +115,10 @@ CREATE TRIGGER objects_geofence
 DROP FUNCTION IF EXISTS objects_update CASCADE;
 CREATE FUNCTION objects_update() RETURNS trigger AS $$
     DECLARE
+        channel text := 'objects';
         fences_old integer[];
         fences_entered integer[];
         fences_left integer[];
-        channel text := 'objects';
         events_json jsonb;
         location_json jsonb;
         payload_json jsonb;

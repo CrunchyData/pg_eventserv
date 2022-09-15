@@ -43,8 +43,11 @@
 <div id="map"></div>
 
 <script>
-
-var objectServer = "ws://localhost:7700/objects";
+var channel = "objects";
+var host = location.hostname;
+var port = location.port;
+var proto = (location.protocol == "https" ? "wss" : "ws");
+var objectServer = `${proto}://${host}:${port}/listen/${channel}`;
 var objectSource = new ol.source.Vector();
 var objectLayer = new ol.layer.Vector({
   source: objectSource,

@@ -21,7 +21,7 @@
 
     function connect() {
       var channel = document.getElementById("channel").value;
-      var url = "{{ .BaseURL }}/channels/" + channel;
+      var url = "{{ .BaseURL }}/listen/" + channel;
       var channelsDiv = document.getElementById("channels");
       var div = document.createElement("div");
       channelsDiv.append(div);
