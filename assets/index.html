@@ -18,7 +18,10 @@
     </div>
   </div>
   <script>
+    // all the sockets we have connected to
+    var sockets = [];
 
+    // run when the "Connect" button is clicked
     function connect() {
       var channel = document.getElementById("channel").value;
       var url = "{{ .BaseURL }}/listen/" + channel;
@@ -29,25 +32,37 @@
       var outputStatus = document.getElementById(`status_${channel}`);
       var outputContent = document.getElementById(`content_${channel}`);
       var ws = new WebSocket(url);
-      ws.onopen = function () {
-        outputStatus.innerHTML = `Connected to <b>${channel}</b>`;
-      };
-      ws.onerror = function(error) {
-        console.log(error);
-      };
-      ws.onmessage = function (msg) {
-        try {
-          var msg_json = JSON.parse(msg.data);
-          outputContent.innerHTML = JSON.stringify(msg_json, null, 2) + "\n";
+      if (ws) {
+        sockets.push(ws);
+        ws.onopen = function () {
+          outputStatus.innerHTML = `Connected to <b>${channel}</b>`;
+        };
+        ws.onerror = function(error) {
+          console.log(error);
+        };
+        ws.onmessage = function (msg) {
+          try {
+            var msg_json = JSON.parse(msg.data);
+            outputContent.innerHTML = JSON.stringify(msg_json, null, 2) + "\n";
+          }
+          catch (err) {
+            outputContent.innerHTML = msg.data + "\n";
+          }
         }
-        catch (err) {
-          outputContent.innerHTML = msg.data + "\n";
+        ws.onclose = function(event) {
+          console.log("ws.onclose called");
+          outputStatus.innerHTML = `Connection to <b>${channel}</b> closed (${event.code})\n`;
+          // outputContent.innerHTML = wsCloseReason(event.code);
         }
       }
-      ws.onclose = function(event) {
-        outputStatus.innerHTML = `Connection to <b>${channel}</b> closed (${event.code})\n`;
-        // outputContent.innerHTML = wsCloseReason(event.code);
-      }
+    }
+
+    // when navigating away from the page, shut down all the sockets
+    // on the way out
+    window.onbeforeunload = function(event) {
+      sockets.forEach((ws) => {
+        ws.close(1000);
+      });
     }
 
     function wsCloseReason(code) {

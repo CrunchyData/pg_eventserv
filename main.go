@@ -376,21 +376,29 @@ func webSocketHandler(ctx context.Context) http.Handler {
 		socketInfo.relayPoolMutex.Unlock()
 
 		// Listen to the broadcasts for this channel
-		lst := (*relay).Listener(1)
+		relayListener := (*relay).Listener(1)
 
 		// Goroutine to monitor the relay listener and send messages
 		// to the web socket client when new notifications arrive
-		go func() {
-			defer lst.Close()
-			for n := range lst.Ch() { // Ranges over notifications
-				log.Debugf("sending notification to web socket %d: %s", wsNumber, n.Payload)
-				bPayload := []byte(n.Payload)
-				if err := ws.WriteMessage(websocket.TextMessage, bPayload); err != nil {
-					log.Debugf("web socket %d closed connection", wsNumber)
+		ctxWsCtx, wsCancel := context.WithCancel(ctx)
+		go func(i int, lstnr *broadcast.Listener[pgconn.Notification], lstnrCtx context.Context) {
+			defer lstnr.Close()
+			// var n pgconn.Notification
+			for {
+				select {
+				case n := <-lstnr.Ch():
+					log.Debugf("sending notification to web socket %d: %s", i, n.Payload)
+					bPayload := []byte(n.Payload)
+					if err := ws.WriteMessage(websocket.TextMessage, bPayload); err != nil {
+						log.Debugf("web socket %d closed connection", i)
+						return
+					}
+				case <-lstnrCtx.Done():
+					log.Debugf("shutting down listener for web socket %d", i)
 					return
 				}
 			}
-		}()
+		}(wsNumber, relayListener, ctxWsCtx)
 
 		// Keep this web socket open as long as the client keeps
 		// its side open
@@ -402,11 +410,14 @@ func webSocketHandler(ctx context.Context) http.Handler {
 				// which will do the defered close of the socket and listener
 				if wserr != nil {
 					log.Infof("closing web socket %d after write failure", wsNumber)
+					ws.Close()
+					wsCancel()
 					return
 				}
 			case <-ctx.Done():
 				log.Debugf("webSocketHandler, closing websocket %d", wsNumber)
 				ws.Close()
+				wsCancel()
 				return
 			}
 		}
