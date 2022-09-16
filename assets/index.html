@@ -12,7 +12,8 @@
 <body>
   <h1>pg_eventserv</h1>
   <div id="content">
-    <p>Enter a channel name and click "Connect".</p>
+    <p>Enter a channel name and click "Connect".<br/>
+      Channels available: {{ .Channels }}</p>
     <p><input type="text" id="channel">&nbsp;<input type="button" value="Connect" onClick="connect()"></p>
     <div id="channels">
     </div>

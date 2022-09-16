@@ -44,9 +44,8 @@ var pool *pgxpool.Pool
 const programName string = "pg_eventserv"
 
 // programVersion is the version string we use
-const programVersion string = "0.1"
+var programVersion string
 
-// var programVersion string
 var globalSocketCount int = 0
 
 // globalDb is a global database connection pointer
@@ -149,10 +148,12 @@ func init() {
 	// 1d, 1h, 1m, 1s, see https://golang.org/pkg/time/#ParseDuration
 	viper.SetDefault("DbPoolMaxConnLifeTime", "1h")
 	viper.SetDefault("DbPoolMaxConns", 4)
-	viper.SetDefault("DbTimeout", 10)
 	viper.SetDefault("CORSOrigins", []string{"*"})
 	viper.SetDefault("BasePath", "/")
 	viper.SetDefault("Channels", []string{"*"})
+	if programVersion == "" {
+		programVersion = "latest"
+	}
 }
 
 func main() {
@@ -432,10 +433,15 @@ func requestIndexHTML(w http.ResponseWriter, r *http.Request) {
 	}).Trace("requestIndexHTML")
 
 	type IndexFields struct {
-		BaseURL string
+		BaseURL  string
+		Channels string
 	}
 
-	indexFields := IndexFields{serverWsBase(r)}
+	indexFields := IndexFields{
+		BaseURL:  serverWsBase(r),
+		Channels: strings.Join(viper.GetStringSlice("Channels"), ", "),
+	}
+
 	tmpl, err := template.ParseFiles(fmt.Sprintf("%s/index.html", viper.GetString("AssetsPath")))
 	if err != nil {
 		return
