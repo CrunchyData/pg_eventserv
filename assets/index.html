@@ -45,8 +45,8 @@
         }
       }
       ws.onclose = function(event) {
-        outputStatus.innerHTML = `Connection to <b>${channel}</b> closed\n`;
-        outputContent.innerHTML = wsCloseReason(event.code);
+        outputStatus.innerHTML = `Connection to <b>${channel}</b> closed (${event.code})\n`;
+        // outputContent.innerHTML = wsCloseReason(event.code);
       }
     }
 

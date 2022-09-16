@@ -49,11 +49,6 @@ const programVersion string = "0.1"
 // var programVersion string
 var globalSocketCount int = 0
 
-func nextSocketNum() int {
-	globalSocketCount = globalSocketCount + 1
-	return globalSocketCount
-}
-
 // globalDb is a global database connection pointer
 var globalDb *pgxpool.Pool = nil
 
@@ -70,6 +65,12 @@ var upgrader = websocket.Upgrader{
 	// Temporarily disable origin checking on the websockets upgrader
 	CheckOrigin:       func(r *http.Request) bool { return true },
 	EnableCompression: false,
+}
+
+type SocketContext struct {
+	relayPool      RelayPool
+	relayPoolMutex *sync.Mutex
+	db             *pgxpool.Pool
 }
 
 /**********************************************************************/
@@ -111,7 +112,7 @@ func (rm RelayPool) HasChannel(channel string) bool {
 
 /**********************************************************************/
 
-func ChannelValid(checkChannel string) bool {
+func channelValid(checkChannel string) bool {
 	validList := viper.GetStringSlice("Channels")
 	for _, channelGlob := range validList {
 		matcher, err := glob.Compile(channelGlob)
@@ -126,6 +127,11 @@ func ChannelValid(checkChannel string) bool {
 	}
 	log.Infof("web socket creation request invalid channel '%s'", checkChannel)
 	return false
+}
+
+func nextSocketNum() int {
+	globalSocketCount = globalSocketCount + 1
+	return globalSocketCount
 }
 
 /**********************************************************************/
@@ -222,21 +228,38 @@ func main() {
 		viper.GetString("HttpHost"), viper.GetInt("HttpsPort")), basePath))
 	log.Infof("Channels available: %s", strings.Join(viper.GetStringSlice("Channels"), ", "))
 
-	// made a database connection pool
-	db, err := dbConnect()
+	// Make a database connection pool
+	dbPool, err := dbConnect()
 	if err != nil {
-		log.Fatal("database connection failed")
 		os.Exit(1)
 	}
 
-	relayMap := make(RelayPool)
-	relayMapMutex := &sync.Mutex{}
-	wsHandlerFunc := webSocketHandler(relayMap, relayMapMutex, db)
+	socketCtx := SocketContext{
+		relayPool:      make(RelayPool),
+		relayPoolMutex: &sync.Mutex{},
+		db:             dbPool,
+	}
+	// relayMapMutex := &sync.Mutex{}
 
-	r := getRouter(wsHandlerFunc)
+	ctxValue := context.WithValue(
+		context.Background(),
+		"socketCtx", socketCtx)
+	ctxCancel, cancel := context.WithCancel(ctxValue)
 
-	// prepare the HTTP server object
-	// more "production friendly" timeouts
+	// HTTP router setup
+	trimBasePath := strings.TrimLeft(basePath, "/")
+	r := mux.NewRouter().
+		StrictSlash(true).
+		PathPrefix("/" + trimBasePath).
+		Subrouter()
+	// Return front page
+	r.Handle("/", http.HandlerFunc(requestIndexHTML))
+	r.Handle("/index.html", http.HandlerFunc(requestIndexHTML))
+	// Initiate websocket subscription
+	r.Handle("/listen/{channel}", webSocketHandler(ctxCancel))
+
+	// Prepare the HTTP server object
+	// More "production friendly" timeouts
 	// https://blog.simon-frey.eu/go-as-in-golang-standard-net-http-config-will-break-your-production/#You_should_at_least_do_this_The_easy_path
 	s := &http.Server{
 		ReadTimeout:  2 * time.Second,
@@ -245,7 +268,7 @@ func main() {
 		Handler:      r,
 	}
 
-	// start http service
+	// Start http service
 	go func() {
 		// ListenAndServe returns http.ErrServerClosed when the server receives
 		// a call to Shutdown(). Other errors are unexpected.
@@ -254,71 +277,84 @@ func main() {
 		}
 	}()
 
-	// wait here for interrupt signal
+	// Wait here for interrupt signal
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, os.Interrupt)
 	<-sig
-
+	// Shut down everything attached to this context before exit
+	cancel()
+	time.Sleep(100 * time.Millisecond)
 }
 
-// goroutine to watch a PgSQL LISTEN/NOTIFY channel, and
+// Goroutine to watch a PgSQL LISTEN/NOTIFY channel, and
 // send the notification object to the broadcast relay
 // when an event comes through
-func listenForNotify(db *pgxpool.Pool, listenChannel string, relay BcastRelay) {
-	// draw a connection from the pool to use for listening
-	conn, err := db.Acquire(context.Background())
+func listenForNotify(ctx context.Context, listenChannel string) {
+
+	socketInfo := ctx.Value("socketCtx").(SocketContext)
+
+	// read (and/or create) a broadcast relay for this listen channel name
+	socketInfo.relayPoolMutex.Lock()
+	relay := socketInfo.relayPool.GetRelay(listenChannel)
+	socketInfo.relayPoolMutex.Unlock()
+
+	// Draw a connection from the pool to use for listening
+	conn, err := socketInfo.db.Acquire(ctx)
 	if err != nil {
 		log.Fatalf("Error acquiring connection: %s", err)
 	}
 	defer conn.Release()
 	log.Infof("Listening to the '%s' database channel\n", listenChannel)
 
-	// send the LISTEN command to the connection
+	// Send the LISTEN command to the connection
 	listenSQL := fmt.Sprintf("LISTEN %s", listenChannel)
-	_, err = conn.Exec(context.Background(), listenSQL)
+	_, err = conn.Exec(ctx, listenSQL)
 	if err != nil {
 		log.Fatalf("Error listening to '%s' channel: %s", listenChannel, err)
 	}
 
-	// wait for notifications to come off the connection
+	// Wait for notifications to come off the connection
 	for {
-		notification, err := conn.Conn().WaitForNotification(context.Background())
+		notification, err := conn.Conn().WaitForNotification(ctx)
 		if err != nil {
-			log.Warnf("WaitForNotification failed: %s", err)
-			(*relay).Close()
+			log.Debugf("WaitForNotification, %s", err)
+			return
 		}
 
 		log.Debugf("NOTIFY received, channel '%s', payload '%s'",
 			notification.Channel,
 			notification.Payload)
 
-		// send the notification to all listeners connected to the relay
-		(*relay).NotifyCtx(context.Background(), *notification)
+		// Send the notification to all listeners connected to the relay
+		(*relay).NotifyCtx(ctx, *notification)
 	}
 }
 
-// generator function to create http.Handler to the http.Server
+// Generator function to create http.Handler to the http.Server
 // to run. Handler converts request to websocket, and sets up
 // goroutine to listen for broadcast messages from the db notification
 // goroutine. Websocket is held open by pinging client regularly.
-func webSocketHandler(rm RelayPool, rmMutex *sync.Mutex, db *pgxpool.Pool) http.Handler {
+func webSocketHandler(ctx context.Context) http.Handler {
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		wsChannel := mux.Vars(r)["channel"]
 		log.Debugf("request to open channel '%s' received", wsChannel)
 
-		if !ChannelValid(wsChannel) {
-			w.WriteHeader(403) // forbidden
+		socketInfo := ctx.Value("socketCtx").(SocketContext)
+
+		// Check the channel name against the allow channel names list/patterns
+		if !channelValid(wsChannel) {
+			w.WriteHeader(403) // Forbidden
 			errMsg := fmt.Sprintf("requested channel '%s' is not allowed", wsChannel)
 			log.Debug(errMsg)
 			w.Write([]byte(errMsg))
 			return
 		}
 
-		// keep a unique number for each new socket we create
+		// Keep a unique number for each new socket we create
 		wsNumber := nextSocketNum()
 
-		// create the web socket
+		// Create the web socket
 		ws, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
 			log.Warnf("web socket creation failed: %s", err)
@@ -327,23 +363,25 @@ func webSocketHandler(rm RelayPool, rmMutex *sync.Mutex, db *pgxpool.Pool) http.
 		log.Debugf("created websocket %d for channel '%s'", wsNumber, wsChannel)
 		defer ws.Close()
 
-		// make a broadcast listener for this socket
-		rmMutex.Lock()
-		newChannel := rm.HasChannel(wsChannel)
-		relay := rm.GetRelay(wsChannel)
-		rmMutex.Unlock()
-		// Only start a new database listener for new channels
+		// Only start a new database listener for new channels.
 		// All other sockets just hang off the first listeners
-		// relay broadcasts
+		// relay broadcasts.
+		rm := socketInfo.relayPool
+		newChannel := rm.HasChannel(wsChannel)
 		if !newChannel {
-			go listenForNotify(db, wsChannel, relay)
+			go listenForNotify(ctx, wsChannel)
 		}
+		socketInfo.relayPoolMutex.Lock()
+		relay := rm.GetRelay(wsChannel)
+		socketInfo.relayPoolMutex.Unlock()
+
+		// Listen to the broadcasts for this channel
 		lst := (*relay).Listener(1)
-		defer lst.Close()
 
 		// Goroutine to monitor the relay listener and send messages
 		// to the web socket client when new notifications arrive
 		go func() {
+			defer lst.Close()
 			for n := range lst.Ch() { // Ranges over notifications
 				log.Debugf("sending notification to web socket %d: %s", wsNumber, n.Payload)
 				bPayload := []byte(n.Payload)
@@ -357,36 +395,23 @@ func webSocketHandler(rm RelayPool, rmMutex *sync.Mutex, db *pgxpool.Pool) http.
 		// Keep this web socket open as long as the client keeps
 		// its side open
 		for {
-			wserr := ws.WriteMessage(websocket.PingMessage, []byte("ping"))
-			// When socket no longer accepts writes, end this function,
-			// which will do the defered close of the socket and listener
-			if wserr != nil {
-				log.Infof("closing web socket %d after write failure", wsNumber)
+			select {
+			case <-time.After(2 * time.Second):
+				wserr := ws.WriteMessage(websocket.PingMessage, []byte("ping"))
+				// When socket no longer accepts writes, end this function,
+				// which will do the defered close of the socket and listener
+				if wserr != nil {
+					log.Infof("closing web socket %d after write failure", wsNumber)
+					return
+				}
+			case <-ctx.Done():
+				log.Debugf("webSocketHandler, closing websocket %d", wsNumber)
+				ws.Close()
 				return
 			}
-			// Only ping the client every few seconds
-			time.Sleep(time.Second * 2)
 		}
 		// h.ServeHTTP(w, r)
 	})
-}
-
-func getRouter(wsHandler http.Handler) *mux.Router {
-	// creates a new instance of a mux router
-	r := mux.NewRouter().
-		StrictSlash(true).
-		PathPrefix(
-			"/" +
-				strings.TrimLeft(viper.GetString("BasePath"), "/"),
-		).
-		Subrouter()
-
-	// Front page
-	r.Handle("/", http.HandlerFunc(requestIndexHTML))
-	r.Handle("/index.html", http.HandlerFunc(requestIndexHTML))
-	// Channel websocket subscription
-	r.Handle("/listen/{channel}", wsHandler)
-	return r
 }
 
 func requestIndexHTML(w http.ResponseWriter, r *http.Request) {
