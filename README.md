@@ -11,13 +11,6 @@ Download the source code and build:
 go build
 ```
 
-**NOT YET AVAILABLE:** Builds of the latest code:
-
-* [Linux](https://postgisftw.s3.amazonaws.com/pg_eventserv_latest_linux.zip)
-* [Windows](https://postgisftw.s3.amazonaws.com/pg_eventserv_latest_windows.zip)
-* [MacOS](https://postgisftw.s3.amazonaws.com/pg_eventserv_latest_macos.zip)
-* [Docker](https://hub.docker.com/r/pramsey/pg_eventserv)
-
 ## Basic Operation
 
 The executable will read user/connection information from the `DATABASE_URL` and connect to the database, allowing any client with HTTP access to the server to connect and set up a WebSocket listening to any allowed channel on the server.
@@ -38,9 +31,9 @@ pg_eventserv.exe
 
 ### Client Side
 
-Once the service running, you need a client to attach a web socket to it.
+Once the service running, you need a client to attach a web socket to it. You can use the built-in viewer at `http://localhost:7700/` for testing, but you will eventually need to build one into your client application.
 
-Here is a very simple Javascript client.
+Here is a very simple Javascript client, for example.
 
 ```html
 <html>
@@ -102,6 +95,15 @@ export ES_HTTPPORT=7777
 # Operation
 
 The purpose of `pg_eventserv` is to take events that are generated in the database and make them accessible to web clients. The general idea is to instrument the database model to capture the events that are of interest to your application, so you don't need to build that orchestration somewhere else. Databases have lots of logic and filtering smarts, and generating the events of interests inside the database can simplify development of event-driven applications.
+
+## Listening to a Channel
+
+You can listen to any channel allowed by the service (the default is to open all channels, but that can be limited with the `Channels` configuration option) by opening a WebSocket connection with the following URL pattern.
+
+```
+ws://{host}:7700/listen/{channel}
+```
+Once the channel is open all `NOTIFY` commands in the database that reference the channel will cause a WebSockets message to be sent to all clients listening to the channel.
 
 ## Simple Data Notification
 
