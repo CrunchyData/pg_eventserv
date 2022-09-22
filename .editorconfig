@@ -12,28 +12,23 @@ insert_final_newline = true
 indent_style = space
 indent_size = 4
 
-# C files want tab indentation
 [*.go]
 indent_style = tab
 
 [Makefile]
 indent_style = tab
 
-# HTML files want narrow space
-[*.html]
+[*.{html,js,css}]
 indent_style = space
 indent_size = 2
 
-# YAML files want narrow space
 [*.yml]
 indent_style = space
 indent_size = 2
 
-# SQL files want tab indentation
 [*.sql]
 indent_style = space
 indent_size = 2
 
-# .bat files want CRLF
 [*.bat]
 end_of_line = crlf

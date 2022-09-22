@@ -1,10 +1,19 @@
-
+--
+-- We depend on intarray to handle the setwise logic
+-- of determinig if the current fences a object is within
+-- is different from the ones it used to be in, to catch
+-- changes in state.
+--
 CREATE EXTENSION IF NOT EXISTS intarray;
+
+-- We depend on postgis for obvious reasons, doing the
+-- geofence calculation and any other geostuff.
 CREATE EXTENSION IF NOT EXISTS postgis;
 
+-- Create all these functions in a separate schema, for
+-- cleanliness.
 CREATE SCHEMA IF NOT EXISTS moving;
 SET search_path = moving,public;
-
 
 ------------------------------------------------------------------------
 -- TABLES
@@ -21,6 +30,7 @@ CREATE UNLOGGED TABLE objects (
     id integer PRIMARY KEY,
     geog geography(Point),
     ts timestamptz DEFAULT now(),
+    color text,
     props json,
     fences integer[]
 );
@@ -68,7 +78,7 @@ CREATE INDEX geofences_id_x ON geofences (id);
 CREATE INDEX geofences_geog_x ON geofences USING GIST (geog);
 
 ------------------------------------------------------------------------
--- FUNCTIONS
+-- OBJECT STATE FUNCTIONS
 ------------------------------------------------------------------------
 
 --
@@ -90,6 +100,7 @@ CREATE FUNCTION objects_geofence() RETURNS trigger AS $$
             FROM moving.geofences
             WHERE ST_Intersects(geofences.geog, new.geog);
 
+        RAISE DEBUG 'fences_new %', fences_new;
         -- Ensure geofence state gets saved
         NEW.fences := fences_new;
         RETURN NEW;
@@ -98,7 +109,7 @@ $$ LANGUAGE 'plpgsql';
 
 DROP TRIGGER IF EXISTS objects_geofence ON moving.objects;
 CREATE TRIGGER objects_geofence
-    AFTER INSERT OR UPDATE ON moving.objects
+    BEFORE INSERT OR UPDATE ON moving.objects
     FOR EACH ROW
         EXECUTE FUNCTION objects_geofence();
 
@@ -129,10 +140,14 @@ CREATE FUNCTION objects_update() RETURNS trigger AS $$
 
         -- Clean up any nulls
         fences_old := coalesce(OLD.fences, ARRAY[]::integer[]);
+        RAISE DEBUG 'fences_old %', fences_old;
 
         -- Compare to previous fences state
         fences_entered = NEW.fences - fences_old;
         fences_left = fences_old - NEW.fences;
+
+        RAISE DEBUG 'fences_entered %', fences_entered;
+        RAISE DEBUG 'fences_left %', fences_left;
 
         -- Form geofence events into JSON for notify payload
         WITH r AS (
@@ -158,9 +173,10 @@ CREATE FUNCTION objects_update() RETURNS trigger AS $$
             'events', events_json,
             'location', json_build_object(
                 'longitude', ST_X(NEW.geog::geometry),
-                'latitude', ST_Y(NEW.geog::geometry),
-                'ts', NEW.ts,
-                'props', NEW.props))
+                'latitude', ST_Y(NEW.geog::geometry)),
+            'ts', NEW.ts,
+            'color', NEW.color,
+            'props', NEW.props)
         INTO payload_json;
 
         RAISE DEBUG '%', payload_json;
@@ -176,8 +192,100 @@ $$ LANGUAGE 'plpgsql';
 
 DROP TRIGGER IF EXISTS objects_update ON moving.objects;
 CREATE TRIGGER objects_update
-    BEFORE INSERT OR UPDATE ON moving.objects
+    AFTER INSERT OR UPDATE ON moving.objects
     FOR EACH ROW
         EXECUTE FUNCTION objects_update();
 
+
 ------------------------------------------------------------------------
+--
+-- In case we want the UI to update the geofence layer when
+-- new fences are added to the database, we just send a simple
+-- update payload here.
+--
+
+DROP FUNCTION IF EXISTS layer_change CASCADE;
+CREATE FUNCTION layer_change() RETURNS trigger AS $$
+    DECLARE
+        layer_change_json json;
+        channel text := 'objects';
+    BEGIN
+        -- Tell the client what layer changed and how
+        SELECT json_build_object(
+            'layer', TG_TABLE_NAME::text,
+            'change', TG_OP)
+          INTO layer_change_json;
+
+        RAISE DEBUG 'layer_change %', layer_change_json;
+        PERFORM (
+            SELECT pg_notify(channel, layer_change_json::text)
+        );
+        RETURN NEW;
+    END;
+$$ LANGUAGE 'plpgsql';
+
+DROP TRIGGER IF EXISTS layer_change ON moving.geofences;
+CREATE TRIGGER layer_change
+    BEFORE INSERT OR UPDATE OR DELETE ON moving.geofences
+    FOR EACH STATEMENT
+        EXECUTE FUNCTION layer_change();
+
+
+------------------------------------------------------------------------
+--
+-- Very small test set of data that exercises the moving objects
+-- schema and triggers. One fence, and objects that start within
+-- and move without, triggering events.
+--
+
+INSERT INTO moving.geofences (geog, label)
+    VALUES (ST_Segmentize('POLYGON((-10 -10, 10 -10, 10 10, -10 10, -10 -10))'::geography, 100000), 'square');
+
+INSERT INTO moving.geofences (geog, label)
+    VALUES (ST_Buffer('POINT(-110 40)'::geography, 1000000), 'circle');
+
+INSERT INTO moving.objects (geog, id, color)
+    VALUES ('POINT(15 0)', 1, 'red');
+
+INSERT INTO moving.objects (geog, id, color)
+    VALUES ('POINT(-15 0)', 2, 'green');
+
+INSERT INTO moving.objects (geog, id, color)
+    VALUES ('POINT(-90 30)', 3, 'purple');
+
+
+------------------------------------------------------------------------
+--
+-- Expose a function via pg_featureserv to hook the UI up/down/left/right
+-- buttons up to the object state.
+--
+
+CREATE SCHEMA IF NOT EXISTS postgisftw;
+CREATE OR REPLACE FUNCTION postgisftw.object_move(
+	move_id integer, direction text)
+RETURNS TABLE(id integer, geog geography)
+AS $$
+DECLARE
+  xoff real = 0.0;
+  yoff real = 0.0;
+  step real = 2.0;
+BEGIN
+
+  yoff := CASE
+    WHEN direction = 'up' THEN 1 * step
+    WHEN direction = 'down' THEN -1 * step
+    ELSE 0.0 END;
+
+  xoff := CASE
+    WHEN direction = 'left' THEN -1 * step
+    WHEN direction = 'right' THEN 1 * step
+    ELSE 0.0 END;
+
+  RETURN QUERY UPDATE moving.objects mo
+    SET geog = ST_Translate(mo.geog::geometry, xoff, yoff)::geography
+    WHERE mo.id = move_id
+    RETURNING mo.id, mo.geog;
+
+END;
+$$
+LANGUAGE 'plpgsql' VOLATILE;
