@@ -7,11 +7,15 @@ var wsUrl = `${wsHost}/listen/${wsChannel}`;
 
 // Connection information for the pg_featureserv
 // This is where we send commands to move objects
+// and where we draw the geofence and initial
+// object locations from
 var fsHost = "http://localhost:9000";
 var fsObjsUrl = `${fsHost}/collections/moving.objects/items.json`;
 var fsFencesUrl = `${fsHost}/collections/moving.geofences/items.json`;
 
-
+// Objects are colored based on their
+// 'color' property, so we need a dynamicly
+// generated style to reflect that
 var iconStyleCache = {};
 function getIconStyle(feature) {
   var iconColor = feature.get('color');
@@ -34,7 +38,8 @@ function getIconStyle(feature) {
   return iconStyleCache[iconColor];
 };
 
-// Get current set of moving objects from server
+// Download the current set of moving objects from
+// the pg_featureserv
 var objLayer = new ol.layer.Vector({
   source: new ol.source.Vector({
     url: fsObjsUrl,
@@ -43,6 +48,10 @@ var objLayer = new ol.layer.Vector({
   style: getIconStyle
 });
 
+// We need a visual panel for each object so we can
+// click on up/down/left/right controls, so we dynamically
+// build the panels for each record in the set we
+// downloaded from pg_featureserv
 function objsAddToPage() {
   objLayer.getSource().forEachFeature((feature) => {
       // console.log(feature);
@@ -68,10 +77,15 @@ function objsAddToPage() {
     }
   );
 }
+// Cannot build the HTML panels until the features have been
+// fully downloaded.
 objLayer.getSource().on('featuresloadend', objsAddToPage);
 
 
-
+// When a control is clicked, we just need to hit the
+// pg_featureserv function end point with the direction
+// and object id. So we do not have any actions to take
+// in the onreadystatechange method, actually.
 function objMove(objId, direction) {
   //console.log(`move ${objId}! ${direction}`);
   var xmlhttp = new XMLHttpRequest();
@@ -91,7 +105,8 @@ function objMove(objId, direction) {
 }
 
 
-// Get current set of geofences from server
+// Get current set of geofences from the
+// pg_featureserv
 var fenceLayer = new ol.layer.Vector({
   source: new ol.source.Vector({
     url: fsFencesUrl,
@@ -141,7 +156,11 @@ ws.onerror = function(error) {
   console.log(`[error] ${error.message}`);
 };
 
+// Got a message from the WebSocket!
 ws.onmessage = function (e) {
+
+  // First, we can only handle JSON payloads, so quickly
+  // try and parse it as JSON. Catch failures and return.
   try {
     var payload = JSON.parse(e.data);
     outputStatus.innerHTML = JSON.stringify(payload, null, 2) + "\n";
@@ -152,12 +171,21 @@ ws.onmessage = function (e) {
     return;
   }
 
+  // We are not segmenting payloads by channel here, so we could
+  // get an object update payload, or a layer change payload, so
+  // we just look at the keys available to see what we actually have.
+  // Another approach might use two channels, or use a standard
+  // "event_type" key in all payloads.
   if ("object_id" in payload && "events" in payload && "location" in payload) {
     var oid = payload.object_id;
+
+    // The map sends us back coordinates in the map projection,
+    // which is web mercator (EPSG:3857) since we are using
+    // a web mercator back map. That means a little back projection
+    // before we start using the coordinates.
     var lng = payload.location.longitude;
     var lat = payload.location.latitude;
     var coord = ol.proj.transform([lng, lat], 'EPSG:4326', 'EPSG:3857');
-
     const objGeom = new ol.geom.Point(coord);
     const objProps = {
       timeStamp: payload.ts,
@@ -165,6 +193,11 @@ ws.onmessage = function (e) {
       color: payload.color,
     };
     var objectSource = objLayer.getSource();
+
+    // Make sure we already have this object in our
+    // local data source. If we do, we update the object,
+    // if we do not, we create a fresh local object and
+    // add it to our source.
     const curFeature = objectSource.getFeatureById(oid);
     if (curFeature) {
       curFeature.setGeometry(objGeom);
@@ -175,10 +208,26 @@ ws.onmessage = function (e) {
       const newFeature = new ol.Feature(objGeom);
       newFeature.setProperties(objProps);
       newFeature.setId(oid);
-      // console.log(newFeature);
       objectSource.addFeature(newFeature);
+      // console.log(newFeature);
+    }
+
+    // Watch out for enter/leave events and change the color
+    // on the appropriate geofence to match the object
+    // doing the entering/leaving
+    if (payload.events) {
+      // Dumbed down to only handle on event at a time
+      var event = payload.events[0];
+      var fenceId = event.geofence_id;
+      var feat = fenceLayer.getSource().getFeatureById(fenceId);
+      var style = feat.getStyle() ? feat.getStyle() : fenceLayer.getStyle().clone();
+      style.getStroke().setColor(event.action == "entered" ? payload.color : "blue");
+      feat.setStyle(style);
     }
   }
+  // Watch for a "layer changed" payload and fully reload the
+  // data for the appropriate layer when it comes by. Generally
+  // useful for all kinds of map synching needs.
   else if ( "layer" in payload && "change"  in payload ) {
     if ("geofences" == payload.layer) {
       fenceLayer.getSource().refresh();
@@ -186,6 +235,9 @@ ws.onmessage = function (e) {
   }
 
 };
+
+// This is that the payload object looks like, it's only
+// one possibility among many.
 
 // {
 // 'object_id': 1,
