@@ -169,6 +169,7 @@ CREATE FUNCTION objects_update() RETURNS trigger AS $$
 
         -- Form notify payload
         SELECT json_build_object(
+            'type', 'objectchange',
             'object_id', NEW.id,
             'events', events_json,
             'location', json_build_object(
@@ -212,6 +213,7 @@ CREATE FUNCTION layer_change() RETURNS trigger AS $$
     BEGIN
         -- Tell the client what layer changed and how
         SELECT json_build_object(
+            'type', 'layerchange',
             'layer', TG_TABLE_NAME::text,
             'change', TG_OP)
           INTO layer_change_json;
@@ -282,7 +284,8 @@ BEGIN
     ELSE 0.0 END;
 
   RETURN QUERY UPDATE moving.objects mo
-    SET geog = ST_Translate(mo.geog::geometry, xoff, yoff)::geography
+    SET geog = ST_Translate(mo.geog::geometry, xoff, yoff)::geography,
+        ts = now()
     WHERE mo.id = move_id
     RETURNING mo.id, mo.geog;
 

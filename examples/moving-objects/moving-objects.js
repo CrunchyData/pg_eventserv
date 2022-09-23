@@ -115,7 +115,7 @@ var fenceLayer = new ol.layer.Vector({
   style: new ol.style.Style({
     stroke: new ol.style.Stroke({
       color: 'blue',
-      width: 2
+      width: 3
     }),
     fill: new ol.style.Fill({
       color: 'rgba(0, 0, 255, 0.1)'
@@ -171,12 +171,10 @@ ws.onmessage = function (e) {
     return;
   }
 
-  // We are not segmenting payloads by channel here, so we could
-  // get an object update payload, or a layer change payload, so
-  // we just look at the keys available to see what we actually have.
-  // Another approach might use two channels, or use a standard
-  // "event_type" key in all payloads.
-  if ("object_id" in payload && "events" in payload && "location" in payload) {
+  // We are not segmenting payloads by channel here, so we
+  // test the 'type' property to find out what kind of
+  // payload we are dealing with.
+  if ("type" in payload && payload.type == "objectchange") {
     var oid = payload.object_id;
 
     // The map sends us back coordinates in the map projection,
@@ -225,10 +223,11 @@ ws.onmessage = function (e) {
       feat.setStyle(style);
     }
   }
+
   // Watch for a "layer changed" payload and fully reload the
   // data for the appropriate layer when it comes by. Generally
   // useful for all kinds of map synching needs.
-  else if ( "layer" in payload && "change"  in payload ) {
+  if ( "type" in payload && payload.type == "layerchange") {
     if ("geofences" == payload.layer) {
       fenceLayer.getSource().refresh();
     }
