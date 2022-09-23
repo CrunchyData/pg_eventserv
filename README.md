@@ -6,9 +6,20 @@ A [PostgreSQL](https://postgis.net/)-only event server in [Go](https://golang.or
 
 ## Download
 
+## Download
+
+Builds of the latest code:
+
+* [Linux](https://postgisftw.s3.amazonaws.com/pg_eventserv_latest_linux.zip)
+* [Windows](https://postgisftw.s3.amazonaws.com/pg_eventserv_latest_windows.zip)
+* [MacOS](https://postgisftw.s3.amazonaws.com/pg_eventserv_latest_macos.zip)
+* [Docker](https://hub.docker.com/r/pramsey/pg_eventserv)
+
+### Source
+
 Download the source code and build:
 ```
-go build
+make build
 ```
 
 ## Basic Operation

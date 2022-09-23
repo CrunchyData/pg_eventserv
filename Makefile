@@ -25,16 +25,23 @@ clean:  ##         This will clean all local build artifacts
 	$(info Cleaning project...)
 	@rm -f $(PROGRAM)
 	@rm -rf docs/*
+	docker image prune --force
 
-#	docker image prune --force
-
-# docs:   ##          Generate docs
-# 	@rm -rf docs/* && cd hugo && hugo && cd ..
+docs:   ##          Generate docs
+	@rm -rf docs/* && cd hugo && hugo && cd ..
 
 build: $(GOFILES)  ##         Build a local binary using APPVERSION parameter or CI as default
 	go build -v -ldflags "-s -w -X main.programVersion=$(APPVERSION)"
 
-install: $(PROGRAM) docs $(CONFIG) ##        This will install the program locally
+bin-docker:  ##    Build a local binary based off of a golang base docker image
+	sudo docker run --rm -v "$(PWD)":/usr/src/myapp:z -w /usr/src/myapp golang:$(GOVERSION) make APPVERSION=$(APPVERSION) build
+
+build-docker: $(PROGRAM) Dockerfile  ##  Generate a CentOS 7 container with APPVERSION tag, using binary from current environment
+	docker build -f Dockerfile --build-arg VERSION=$(APPVERSION) -t $(CONTAINER):$(APPVERSION) -t $(CONTAINER):$(DATE) .
+
+release: clean docs build build-docker  ##       Generate the docs, a local build, and then uses the local build to generate a CentOS 7 container
+
+install: $(PROGRAM) docs $(CONFIG) ##       This will install the program locally
 	$(MKDIR) -p $(DESTDIR)/usr/bin
 	$(MKDIR) -p $(DESTDIR)/usr/share/$(PROGRAM)
 	$(MKDIR) -p $(DESTDIR)/etc
