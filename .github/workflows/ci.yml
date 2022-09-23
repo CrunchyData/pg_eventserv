@@ -21,7 +21,7 @@ jobs:
       run: make build
 
     - name: 'Bundle Zip'
-      if: github.repository == 'pramsey/pg_eventserv' && github.ref_name == 'main'
+      if: github.repository == 'CrunchyData/pg_eventserv' && github.ref_name == 'main'
       env:
         MATRIX_OS: ${{ matrix.os }}
         PROGRAM: pg_eventserv
