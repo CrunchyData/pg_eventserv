@@ -1,0 +1,36 @@
+html {
+  color: white;
+  background-color: black;
+}
+
+body {
+  margin: 2em 4em;
+  font-family: sans-serif;
+}
+
+.sendarea {
+  display: block;
+  width: 100%;
+}
+
+label {
+  width: 25%;
+}
+
+#message {
+  width:80%;
+}
+
+#send {
+  width:15%;
+}
+
+input {
+  background-color: lightcyan;
+}
+
+textarea {
+  width: 100%;
+  background-color: black;
+  color: white;
+}

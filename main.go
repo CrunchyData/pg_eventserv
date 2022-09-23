@@ -410,7 +410,7 @@ func webSocketHandler(ctx context.Context) http.Handler {
 				// When socket no longer accepts writes, end this function,
 				// which will do the defered close of the socket and listener
 				if wserr != nil {
-					log.Infof("closing web socket %d after write failure", wsNumber)
+					log.Infof("closing idle web socket %d", wsNumber)
 					ws.Close()
 					wsCancel()
 					return

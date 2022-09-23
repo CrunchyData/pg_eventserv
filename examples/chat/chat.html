@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PostgreSQL Chat</title>
+
+  <!-- CSS for app -->
+  <link rel="stylesheet" href="chat.css" type="text/css" />
+</head>
+
+<body>
+  <header><h1>PostgreSQL Chat</h1></header>
+  <p>
+    <label for="username">Username:</label>
+    <input type="text" name="username" id="username" />
+  </p>
+  <p>
+    <label for="channel">Channel:</label>
+    <input type="text" name="channel" id="channel" />
+    <input type="button" value="Connect" id="connect" />
+  </p>
+  <p>
+    <textarea id="textarea" cols="80" rows="20"></textarea>
+  </p>
+  <p class="sendarea">
+    <input type="text" make="message" id="message" />
+    <input type="button" value="Send" id="send" />
+  </p>
+  <p id="status"></p>
+</body>
+
+<script src="chat.js" type="text/javascript"></script>
+
+</body>
+</html>
