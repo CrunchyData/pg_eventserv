@@ -6,8 +6,6 @@ A [PostgreSQL](https://postgis.net/)-only event server in [Go](https://golang.or
 
 ## Download
 
-## Download
-
 Builds of the latest code:
 
 * [Linux](https://postgisftw.s3.amazonaws.com/pg_eventserv_latest_linux.zip)
@@ -49,22 +47,26 @@ Here is a very simple Javascript client, for example.
 ```html
 <html>
     <body>
-        <textarea id="msg" rows="10" cols="80"></textarea>
+        <p><textarea id="display" rows="10" cols="80"></textarea></p>
+        <p id="status"></p>
         <script>
-            const channelName = "foobar"
-            const url = "ws://localhost:7700/listen/" + channelName;
+            // events on channel 'foobar'
+            var url = "ws://localhost:7700/listen/foobar";
+            var status = document.getElementById("status");
+            var display = document.getElementById("display");
+            // open socket and connect event handlers
             var ws = new WebSocket(url);
             ws.onopen = function () {
-                console.log("socket open");
+                status.innerHTML = "Socket connected.";
             };
             ws.onerror = function(error) {
-                console.log(error);
+                status.innerHTML = "Socket error.";
             };
             ws.onmessage = function(msg) {
-                document.getElementById("msg").innerHTML = msg.data;
+                display.innerHTML = msg.data;
             };
             ws.onclose = function(event) {
-                console.log("closed");
+                status.innerHTML = "Socket closed.";
             }
         </script>
     </body>

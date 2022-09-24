@@ -1,4 +1,4 @@
-# Moving Objects Map
+# Moving Objects Map Example
 
 This example combines a database-side state model of moving objects with a client-side map that displays the latest state of the system at all times.
 

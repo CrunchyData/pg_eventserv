@@ -106,8 +106,8 @@ LANGUAGE 'plpgsql' VOLATILE;
 -- Mostly this is just bundling up everything
 -- we know into a JSON payload and sending it
 -- off over the bus.
-DROP FUNCTION IF EXISTS message_broadcast CASCADE;
-CREATE FUNCTION message_broadcast() RETURNS trigger AS $$
+DROP FUNCTION IF EXISTS chat.message_broadcast CASCADE;
+CREATE FUNCTION chat.message_broadcast() RETURNS trigger AS $$
     DECLARE
         broadcast_json jsonb;
     BEGIN
@@ -146,4 +146,4 @@ DROP TRIGGER IF EXISTS message_broadcast ON chat.messages;
 CREATE TRIGGER message_broadcast
     AFTER INSERT ON chat.messages
     FOR EACH ROW
-        EXECUTE FUNCTION message_broadcast();
+        EXECUTE FUNCTION chat.message_broadcast();
