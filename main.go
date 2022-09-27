@@ -225,8 +225,8 @@ func main() {
 	basePath := viper.GetString("BasePath")
 	log.Infof("Serving HTTP  at %s/", formatBaseURL(fmt.Sprintf("http://%s:%d",
 		viper.GetString("HttpHost"), viper.GetInt("HttpPort")), basePath))
-	log.Infof("Serving HTTPS at %s/", formatBaseURL(fmt.Sprintf("http://%s:%d",
-		viper.GetString("HttpHost"), viper.GetInt("HttpsPort")), basePath))
+	// log.Infof("Serving HTTPS at %s/", formatBaseURL(fmt.Sprintf("http://%s:%d",
+	// 	viper.GetString("HttpHost"), viper.GetInt("HttpsPort")), basePath))
 	log.Infof("Channels available: %s", strings.Join(viper.GetStringSlice("Channels"), ", "))
 
 	// Make a database connection pool

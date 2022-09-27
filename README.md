@@ -45,31 +45,45 @@ Once the service running, you need a client to attach a web socket to it. You ca
 Here is a very simple Javascript client, for example.
 
 ```html
-<html>
-    <body>
-        <p><textarea id="display" rows="10" cols="80"></textarea></p>
-        <p id="status"></p>
-        <script>
-            // events on channel 'foobar'
-            var url = "ws://localhost:7700/listen/foobar";
-            var status = document.getElementById("status");
-            var display = document.getElementById("display");
-            // open socket and connect event handlers
-            var ws = new WebSocket(url);
-            ws.onopen = function () {
-                status.innerHTML = "Socket connected.";
-            };
-            ws.onerror = function(error) {
-                status.innerHTML = "Socket error.";
-            };
-            ws.onmessage = function(msg) {
-                display.innerHTML = msg.data;
-            };
-            ws.onclose = function(event) {
-                status.innerHTML = "Socket closed.";
-            }
-        </script>
-    </body>
+<!DOCTYPE html>
+<html lang="en">
+  <body>
+    <p><textarea id="display" rows="20" cols="60"></textarea></p>
+    <p id="status"></p>
+    <script>
+      window.onload = function() {
+        // events on channel 'people'
+        var url = "ws://localhost:7700/listen/people";
+        var status = document.getElementById("status");
+        var display = document.getElementById("display");
+        // open socket and connect event handlers
+        var ws = new WebSocket(url);
+        ws.onopen = function() {
+            status.innerHTML = "Socket open.";
+        };
+        ws.onerror = function(error) {
+            status.innerHTML = "Socket error.";
+        };
+        ws.onmessage = function (e) {
+          // First, we can only handle JSON payloads, so quickly
+          // try and parse it as JSON. Catch failures and return.
+          try {
+            var payload = JSON.parse(e.data);
+            display.innerHTML += JSON.stringify(payload, null, 2) + "\n";
+            display.scrollTop = display.scrollHeight;
+            return;
+          }
+          catch (err) {
+            display.innerHTML = e.data;
+            return;
+          }
+        };
+        ws.onclose = function(event) {
+            status.innerHTML = "Socket closed.";
+        }
+      }
+    </script>
+  </body>
 </html>
 ```
 
@@ -124,19 +138,20 @@ The most basic form of event is a change of data. An insert or an update, for ex
 
 ```sql
 CREATE TABLE people (
+    pk serial primary key,
+    ts timestamptz DEFAULT now(),
     name text,
     age integer,
-    ts timestamptz DEFAULT now(),
     height real
 );
 
 CREATE OR REPLACE FUNCTION data_change() RETURNS trigger AS
 $$
     DECLARE
-        js json;
+        js jsonb;
     BEGIN
-
-        SELECT row_to_json(NEW.*) INTO js;
+        SELECT to_jsonb(NEW.*) INTO js;
+        js := jsonb_set(js, '{dml_action}', to_jsonb(TG_OP));
         PERFORM (
             SELECT pg_notify('people', js::text)
         );
@@ -165,11 +180,11 @@ Sending data modification events is less interesting than sending events when so
 CREATE OR REPLACE FUNCTION data_change() RETURNS trigger AS
 $$
     DECLARE
-        js json;
+        js jsonb;
     BEGIN
         IF NEW.height >= 2.0
         THEN
-            SELECT row_to_json(NEW.*) INTO js;
+            SELECT to_jsonb(NEW.*) INTO js;
             PERFORM (
                 SELECT pg_notify('people', js::text)
             );
