@@ -22,7 +22,7 @@ make build
 
 ## Basic Operation
 
-The executable will read user/connection information from the `DATABASE_URL` and connect to the database, allowing any client with HTTP access to the server to connect and set up a WebSocket listening to any allowed channel on the server.
+The executable will read user/connection information from the `DATABASE_URL` environment variable and connect to the database, allowing any client with HTTP access to the server to connect and set up a WebSocket listening to any allowed channel on the server.
 
 ### Linux/MacOS
 
@@ -40,7 +40,7 @@ pg_eventserv.exe
 
 ### Client Side
 
-Once the service running, you need a client to attach a web socket to it. You can use the built-in viewer at `http://localhost:7700/` for testing, but you will eventually need to build one into your client application.
+Once the service is running, you need a client to attach a web socket to it. You can use the built-in viewer at `http://localhost:7700/` for testing, but you will eventually need to build one into your client application.
 
 Here is a very simple Javascript client, for example.
 
@@ -65,18 +65,16 @@ Here is a very simple Javascript client, for example.
             status.innerHTML = "Socket error.";
         };
         ws.onmessage = function (e) {
-          // First, we can only handle JSON payloads, so quickly
-          // try and parse it as JSON. Catch failures and return.
+          // First try to parse message as JSON.
+          // Catch failures and return.
           try {
             var payload = JSON.parse(e.data);
             display.innerHTML += JSON.stringify(payload, null, 2) + "\n";
-            display.scrollTop = display.scrollHeight;
-            return;
           }
           catch (err) {
-            display.innerHTML = e.data;
-            return;
+            display.innerHTML += e.data + "\n";
           }
+          display.scrollTop = display.scrollHeight;
         };
         ws.onclose = function(event) {
             status.innerHTML = "Socket closed.";
