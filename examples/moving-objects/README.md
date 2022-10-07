@@ -42,3 +42,104 @@ The actual movement and state changes are all handled in the `onmessage()`  meth
 * For objects, it updates the object location, and if there has been a geofence enter/leave event, updates the color of the geofence to match the object.
 
 
+## Trying It Out
+
+All the code and files are available in this [examples directory](https://github.com/CrunchyData/pg_eventserv/tree/main/examples/moving-objects).
+
+* You can run the database in [Crunchy Bridge](https://crunchybridge.com/) and the services using [Container Apps](https://docs.crunchybridge.com/container-apps/) in Crunchy Bridge.
+* Or you can run the database on your local computer and also run the services locally using an appropriate binary for your operating system.
+
+### Load Database
+
+First, load up the [moving-objects.sql](moving-objects.sql) file in your database. This creates all the tables and triggers to keep the model up-to-date. A good practice is to use an `application` user instead of the `postgres` user as the owner for the tables and triggers. That way you can connect the services using a lower-priv database user.
+
+### Start Services (Container Apps)
+
+Now, start up the services as [container apps](https://docs.crunchybridge.com/container-apps/)! (This you will have to do as the `postgres` user.)
+
+This command starts up `pg_featureserv`:
+
+```
+SELECT run_container('
+    -dt
+    -p 5437:9000/tcp
+    --log-driver k8s-file
+    --log-opt max-size=1mb
+    -e DATABASE_URL="postgres://application:xxxxxxxxxx@p.xxxxxxxxxx.db.postgresbridge.com:5432/dbname"
+    -e PGFS_SERVER_HTTPPORT=9000
+    -e PGFS_PAGING_LIMITDEFAULT=10000
+    -e PGFS_PAGING_LIMITMAX=10000
+    docker.io/pramsey/pg_featureserv:latest
+    ');
+```
+
+The newlines in the example above have to be stripped out before running the SQL command. Note that the external port is **5437** in order to be within the allowable port range for container apps. This is important below when hooking up the web UI to the services.
+
+This command starts up `pg_eventserv`:
+
+```
+SELECT run_container('
+    -dt
+    -p 5438:7700/tcp
+    --log-driver k8s-file
+    --log-opt max-size=1mb
+    -e DATABASE_URL="postgres://application:xxxxxxxx@p.xxxxxxxx.db.postgresbridge.com:5432/dbname"
+    -e ES_HTTPPORT=7700
+    docker.io/pramsey/pg_eventserv:latest
+');
+```
+
+Now you should be up and running! You can also just download the binaries of the two services directly and run them locally and use the default `localhost` addresses.
+
+### Start Services (Local Apps)
+
+If you have downloaded [pg_featureserv](https://github.com/crunchydata/pg_featureserv) and [pg_eventserv](https://github.com/crunchydata/pg_eventserv) binaries, then firing up the services is very easy!
+
+Unzip the feature service download and start it up!
+
+```bash
+mkdir pg_featureserv
+cd pg_featureserv
+unzip ../pg_featureserv_latest_linux.zip
+export DATABASE_URL=postgres://dbuser:dbpass@dbhost:5432/dbname
+./pg_featureserv
+```
+
+Unzip the event service download and start it up!
+
+```bash
+mkdir pg_eventserv
+cd pg_eventserv
+unzip ../pg_eventserv_latest_linux.zip
+export DATABASE_URL=postgres://dbuser:dbpass@dbhost:5432/dbname
+./pg_eventserv
+```
+
+
+### Modify Map Client
+
+The [map client JavaScript](moving-objects.js) needs to be modified to point at your new servers, on their ports!
+
+Find the following variables and edit them to point to your services.
+
+The event server web socket host:
+
+```
+var wsHost = "ws://yourhostname:7700";
+```
+
+Note that the port is not the default service port, but the port the container is running at on Crunchy Bridge.
+
+The feature server HTTP host:
+
+```
+var fsHost = "http://yourhostname:9000";
+```
+
+If you are running the services locally, you can just leave the example code as is.
+
+
+### Try it!
+
+Open up the [HTML page](moving-objects.html), and you should see the working map!
+
