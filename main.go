@@ -362,6 +362,7 @@ func webSocketHandler(ctx context.Context) http.Handler {
 			return
 		}
 		log.Debugf("created websocket %d for channel '%s'", wsNumber, wsChannel)
+		wsMutex := sync.Mutex{}
 		defer ws.Close()
 
 		// Only start a new database listener for new channels.
@@ -390,10 +391,12 @@ func webSocketHandler(ctx context.Context) http.Handler {
 				case n := <-lstnr.Ch():
 					log.Debugf("sending notification to web socket %d: %s", i, n.Payload)
 					bPayload := []byte(n.Payload)
+					wsMutex.Lock()
 					if err := ws.WriteMessage(websocket.TextMessage, bPayload); err != nil {
 						log.Debugf("web socket %d closed connection", i)
 						return
 					}
+					wsMutex.Unlock()
 				case <-lstnrCtx.Done():
 					log.Debugf("shutting down listener for web socket %d", i)
 					return
@@ -406,7 +409,9 @@ func webSocketHandler(ctx context.Context) http.Handler {
 		for {
 			select {
 			case <-time.After(2 * time.Second):
+				wsMutex.Lock()
 				wserr := ws.WriteMessage(websocket.PingMessage, []byte("ping"))
+				wsMutex.Unlock()
 				// When socket no longer accepts writes, end this function,
 				// which will do the defered close of the socket and listener
 				if wserr != nil {
