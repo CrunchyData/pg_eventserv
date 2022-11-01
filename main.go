@@ -124,7 +124,7 @@ func channelValid(checkChannel string) bool {
 			return true
 		}
 	}
-	log.Infof("web socket creation request invalid channel '%s'", checkChannel)
+	log.Infof("Web socket creation request invalid channel '%s'", checkChannel)
 	return false
 }
 
@@ -415,7 +415,7 @@ func webSocketHandler(ctx context.Context) http.Handler {
 				// When socket no longer accepts writes, end this function,
 				// which will do the defered close of the socket and listener
 				if wserr != nil {
-					log.Infof("closing idle web socket %d", wsNumber)
+					log.Infof("Closing idle web socket %d", wsNumber)
 					ws.Close()
 					wsCancel()
 					return
