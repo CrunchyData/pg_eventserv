@@ -183,9 +183,7 @@ CREATE FUNCTION objects_update() RETURNS trigger AS $$
         RAISE DEBUG '%', payload_json;
 
         -- Send the payload out on the channel
-        PERFORM (
-            SELECT pg_notify(channel, payload_json::text)
-        );
+        PERFORM pg_notify(channel, payload_json::text);
 
         RETURN NEW;
     END;
@@ -208,20 +206,19 @@ CREATE TRIGGER objects_update
 DROP FUNCTION IF EXISTS layer_change CASCADE;
 CREATE FUNCTION layer_change() RETURNS trigger AS $$
     DECLARE
-        layer_change_json json;
+        payload text;
         channel text := 'objects';
     BEGIN
         -- Tell the client what layer changed and how
         SELECT json_build_object(
             'type', 'layerchange',
-            'layer', TG_TABLE_NAME::text,
-            'change', TG_OP)
-          INTO layer_change_json;
+            'layer', TG_TABLE_NAME,
+            'change', TG_OP)::text
+          INTO payload;
 
-        RAISE DEBUG 'layer_change %', layer_change_json;
-        PERFORM (
-            SELECT pg_notify(channel, layer_change_json::text)
-        );
+        RAISE DEBUG 'layer_change %', payload;
+        PERFORM SELECT pg_notify(channel, payload);
+
         RETURN NEW;
     END;
 $$ LANGUAGE 'plpgsql';
