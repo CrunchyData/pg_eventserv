@@ -157,7 +157,9 @@ $$
     END;
 $$ LANGUAGE 'plpgsql';
 
-CREATE OR REPLACE TRIGGER data_change_trigger
+DROP TRIGGER IF EXISTS data_change_trigger
+  ON people;
+CREATE TRIGGER data_change_trigger
     BEFORE INSERT OR UPDATE ON people
     FOR EACH ROW
         EXECUTE FUNCTION data_change();
