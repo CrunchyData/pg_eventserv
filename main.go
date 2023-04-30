@@ -35,6 +35,7 @@ import (
 
 	// PostgreSQL connection
 	"github.com/jackc/pgconn"
+	"github.com/jackc/pgx/v4"
 	"github.com/jackc/pgx/v4/pgxpool"
 )
 
@@ -308,7 +309,7 @@ func listenForNotify(ctx context.Context, listenChannel string) {
 	log.Infof("Listening to the '%s' database channel\n", listenChannel)
 
 	// Send the LISTEN command to the connection
-	listenSQL := fmt.Sprintf("LISTEN %s", listenChannel)
+	listenSQL := fmt.Sprintf("LISTEN %s", pgx.Identifier{listenChannel}.Sanitize())
 	_, err = conn.Exec(ctx, listenSQL)
 	if err != nil {
 		log.Fatalf("Error listening to '%s' channel: %s", listenChannel, err)
